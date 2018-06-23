@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
+
+	"fmt"
 
 	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
@@ -34,7 +37,7 @@ var (
 )
 
 // StartPortForward add a new pod and start port binding
-func StartPortForward(obj *v1.Pod, key string) {
+func StartPortForward(obj *v1.Pod, key string) error {
 	firstRunningState := false
 
 	label := obj.Labels["app"]
@@ -42,9 +45,11 @@ func StartPortForward(obj *v1.Pod, key string) {
 
 	name := obj.GetName()
 	deletionTimestamp := obj.DeletionTimestamp
-	port := fetchServicePort(label)
 
-	AddPod(key, name, label, port)
+	for _, port := range fetchServicePort(label) {
+		port := strconv.Itoa(int(port))
+		AddPod(key, name, label, port)
+	}
 
 	// Check pod condition
 	for _, item := range obj.Status.Conditions {
@@ -56,34 +61,53 @@ func StartPortForward(obj *v1.Pod, key string) {
 	}
 
 	if firstRunningState {
-		go func(pod Pod) {
-			glog.Warningln("Listening", pod.Name, "gorouting start on", pod.Port)
+		for _, port := range fetchServicePort(label) {
+			port := strconv.Itoa(int(port))
+			podKey := CreateKey(key, port)
 
-			defer func() {
-				glog.Warningln("So long and thanks for all the fish")
-				glog.Flush()
-			}()
+			go func(pod Pod) {
+				defer func() {
+					glog.Warningln("So long and thanks for all the fish")
+					glog.Flush()
+				}()
 
-			req := Clientset.CoreV1().RESTClient().Post().Resource("pods").
-				Namespace("default").Name(pod.Name).SubResource("portforward")
+				port := pod.Port
 
-			ForwardPort("POST", req.URL(), Config, []string{pod.Port},
-				pod.CloseChan, pod.ReadyChan)
-		}(Pods[key])
+				glog.Warningln("Listening", pod.Name, "gorouting start on", port)
+
+				req := Clientset.CoreV1().RESTClient().Post().Resource("pods").
+					Namespace("default").Name(pod.Name).SubResource("portforward")
+				ForwardPort(
+					"POST",
+					req.URL(),
+					Config,
+					[]string{port},
+					pod.CloseChan,
+					pod.ReadyChan,
+				)
+			}(Pods[podKey])
+		}
 	}
+	return nil
+}
+
+func CreateKey(key, port string) string {
+	return fmt.Sprintf("%s-%s", key, port)
 }
 
 //AddPod on running list
-func AddPod(key string, name string, label string, port int32) {
-	if _, ok := Pods[key]; !ok {
+func AddPod(key string, name string, label string, port string) {
+	podKey := CreateKey(key, port)
+
+	if _, ok := Pods[podKey]; !ok {
 		closeChan := make(chan struct{})
 		readyChan := make(chan struct{})
 
-		glog.Infoln("Starting pod", name)
+		glog.Infoln("-> Starting pod: ", name, key)
 
-		Pods[key] = Pod{
+		Pods[podKey] = Pod{
 			Name:      name,
-			Port:      strconv.Itoa(int(port)),
+			Port:      port,
 			CloseChan: closeChan,
 			ReadyChan: readyChan,
 			Label:     label,
@@ -93,24 +117,31 @@ func AddPod(key string, name string, label string, port int32) {
 
 // RemovePod from running list and close communication channel
 func RemovePod(key string) {
-	pod := Pods[key]
+	for podKey := range Pods {
+		if strings.Contains(podKey, key) {
+			pod := Pods[podKey]
 
-	close(pod.CloseChan)
-	delete(Pods, key)
+			close(pod.CloseChan)
+			delete(Pods, podKey)
 
-	glog.Warningln(key, "pod deleted.")
+			glog.Warningln(key, " listening closed: ", pod.Port)
+		}
+	}
 }
 
 // fetchServicePort fetches service port with label
-func fetchServicePort(label string) int32 {
+func fetchServicePort(label string) []int32 {
+	var ports []int32
+
 	req, _ := Clientset.CoreV1().Services("default").List(meta.ListOptions{
 		LabelSelector: "app=" + label,
 	})
 	for _, service := range req.Items {
-		return service.Spec.Ports[0].Port
-
+		for _, port := range service.Spec.Ports {
+			ports = append(ports, port.Port)
+		}
 	}
-	return int32(0)
+	return ports
 }
 
 // StartForwardingPorts initialize port forwarding based on json file
@@ -126,13 +157,13 @@ func ForwardPort(method string, url *url.URL, config *rc.Config, ports []string,
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, method, url)
 	fw, err := portforward.New(dialer, ports, stopChannel, readyChannel, cmdOut, cmdErr)
 	if err != nil {
-		glog.Error(err)
+		glog.Error("NEW PORT ", err)
 		return err
 	}
 
 	err = fw.ForwardPorts()
 	if err != nil {
-		glog.Error(err)
+		glog.Error("PORT FORWARD ", err)
 		return err
 	}
 
