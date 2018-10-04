@@ -17,6 +17,7 @@ import (
 	kb "k8s.io/client-go/kubernetes"
 	rc "k8s.io/client-go/rest"
 
+	"github.com/getsentry/raven-go"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -30,10 +31,14 @@ type Pod struct {
 }
 
 var (
-	Pods map[string]Pod = make(map[string]Pod)
+	// Pods keys
+	Pods = make(map[string]Pod)
 
+	// Clientset configuration
 	Clientset *kb.Clientset
-	Config    *rc.Config
+
+	// Config rest
+	Config *rc.Config
 )
 
 // StartPortForward add a new pod and start port binding
@@ -150,20 +155,23 @@ func ForwardPort(method string, url *url.URL, config *rc.Config, ports []string,
 
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
-		glog.Error(err)
+		tags := map[string]string{"error": "rt-port-forward"}
+		raven.CaptureErrorAndWait(err, tags)
 		return err
 	}
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, method, url)
 	fw, err := portforward.New(dialer, ports, stopChannel, readyChannel, cmdOut, cmdErr)
 	if err != nil {
-		glog.Error("NEW PORT ", err)
+		tags := map[string]string{"error": "new-port-forward"}
+		raven.CaptureErrorAndWait(err, tags)
 		return err
 	}
 
 	err = fw.ForwardPorts()
 	if err != nil {
-		glog.Error("PORT FORWARD ", err)
+		tags := map[string]string{"error": "fw-port-forward"}
+		raven.CaptureErrorAndWait(err, tags)
 		return err
 	}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/getsentry/raven-go"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"os"
@@ -37,6 +38,8 @@ var (
 )
 
 func init() {
+	raven.SetDSN(os.Getenv("RAVEN_DSN"))
+
 	rootCmd.PersistentFlags().StringVar(&kubeConfig, "kubeconfig",
 		filepath.Join(home, ".kube", "config"), "absolute path to the kubeconfig file")
 	rootCmd.PersistentFlags().StringVar(&forwardFile, "file",
