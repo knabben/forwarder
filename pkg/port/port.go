@@ -72,7 +72,7 @@ func StartPortForward(obj *v1.Pod, key string) error {
 
 			go func(pod Pod) {
 				defer func() {
-					glog.Warningln("So long and thanks for all the fish")
+					glog.Warningln("So long and thanks for all the fish ", pod.Name)
 					glog.Flush()
 				}()
 

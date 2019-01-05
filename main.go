@@ -1,17 +1,14 @@
 package main
 
 import (
+	"os"
 	"github.com/getsentry/raven-go"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"os"
-	"path/filepath"
 )
 
 var (
 	home = os.Getenv("HOME")
-
-	forwardFile string
 	kubeConfig  string
 
 	rootCmd = &cobra.Command{
@@ -40,10 +37,7 @@ var (
 func init() {
 	raven.SetDSN(os.Getenv("RAVEN_DSN"))
 
-	rootCmd.PersistentFlags().StringVar(&kubeConfig, "kubeconfig",
-		filepath.Join(home, ".kube", "config"), "absolute path to the kubeconfig file")
-	rootCmd.PersistentFlags().StringVar(&forwardFile, "file",
-		filepath.Join(home, ".kube", "forwarders.json"), "forwarders JSON file")
+	rootCmd.PersistentFlags().StringVar(&kubeConfig, "kubeconfig", os.Getenv("KUBECONFIG"), "path to kubeconfig")
 }
 
 func main() {
